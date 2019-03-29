@@ -1,0 +1,40 @@
+import java.util.TreeSet;
+
+class Simulation {
+  private final Network network;
+  private final TreeSet<Event> eventsByTime = new TreeSet<>();
+
+  Simulation(Network network) {
+    this.network = network;
+  }
+
+  Node getLeader(int index) {
+    return network.getLeader(index);
+  }
+
+  void scheduleEvent(Event event) {
+    eventsByTime.add(event);
+  }
+
+  /**
+   * Run until all events have been processed, including any newly added events which may be added
+   * while running.
+   */
+  void run() {
+    for (Node node : network.getNodes()) {
+      node.onStart(this);
+    }
+
+    while (!eventsByTime.isEmpty()) {
+      Event event = eventsByTime.pollFirst();
+      Node subject = event.getSubject();
+      if (event instanceof TimerEvent) {
+        subject.onTimerEvent((TimerEvent) event, this);
+      } else if (event instanceof MessageEvent) {
+        subject.onMessageEvent((MessageEvent) event, this);
+      } else {
+        throw new AssertionError("Unexpected event: " + event);
+      }
+    }
+  }
+}
