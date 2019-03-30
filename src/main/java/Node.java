@@ -1,12 +1,6 @@
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 abstract class Node {
   private final EarthPosition position;
+  private Proposal output;
   private double terminationTime;
 
   Node(EarthPosition position) {
@@ -18,6 +12,11 @@ abstract class Node {
   abstract void onTimerEvent(TimerEvent timerEvent, Simulation simulation);
 
   abstract void onMessageEvent(MessageEvent messageEvent, Simulation simulation);
+
+  void output(Proposal output, double terminationTime) {
+    this.output = output;
+    this.terminationTime = terminationTime;
+  }
 
   /** The great-circle distance to another node, in meters. */
   double getDistance(Node that) {

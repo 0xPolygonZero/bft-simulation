@@ -1,4 +1,5 @@
 import java.util.List;
+import java.util.Random;
 
 abstract class Network {
   /** The speed of light in a vacuum, in meters per second. */
@@ -35,14 +36,20 @@ abstract class Network {
 }
 
 /**
- * A network in which all nodes are directly connected through a fiber optic cable.
+ * A network in which all nodes are directly connected through a fiber optic cable, but there are
+ * random delays up to 2x.
  */
 class FullyConnectedNetwork extends Network {
-  FullyConnectedNetwork(List<Node> nodes) {
+  private final Random random;
+
+  FullyConnectedNetwork(List<Node> nodes, Random random) {
     super(nodes);
+    this.random = random;
   }
 
   public double getLatency(Node source, Node destination) {
-    return source.getDistance(destination) / Network.SPEED_OF_FIBER;
+    double bestCaseLatency = source.getDistance(destination) / Network.SPEED_OF_FIBER;
+    double multiplier = random.nextDouble() * 2;
+    return multiplier * bestCaseLatency;
   }
 }

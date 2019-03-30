@@ -10,6 +10,10 @@ abstract class Event implements Comparable<Event> {
     this.subject = subject;
   }
 
+  double getTime() {
+    return time;
+  }
+
   Node getSubject() {
     return subject;
   }

@@ -12,7 +12,7 @@ class Vector3d {
 
   /** The Euclidean norm of this vector. */
   double norm() {
-    return x * x + y * y + z * z;
+    return Math.sqrt(x * x + y * y + z * z);
   }
 
   Vector3d scaled(double s) {

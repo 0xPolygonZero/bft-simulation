@@ -8,6 +8,18 @@ class Simulation {
     this.network = network;
   }
 
+  void broadcast(Node source, Message message, double time) {
+    for (Node destination : network.getNodes()) {
+      double latency = network.getLatency(source, destination);
+      double arrivalTime = time + latency;
+      eventsByTime.add(new MessageEvent(arrivalTime, destination, message));
+    }
+  }
+
+  Network getNetwork() {
+    return network;
+  }
+
   Node getLeader(int index) {
     return network.getLeader(index);
   }
