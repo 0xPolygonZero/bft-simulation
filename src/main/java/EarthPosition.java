@@ -5,7 +5,7 @@ import java.util.Random;
  */
 class EarthPosition {
   /** The Earth's radius, in meters. */
-  private static double RADIUS = 6.378e6;
+  private static final double EARTH_RADIUS = 6.378e6;
 
   /** A normalized vector representing the direction of this position from the Earth's center. */
   private final Vector3d direction;
@@ -32,11 +32,17 @@ class EarthPosition {
   /** The great-circle distance to another earth position, in meters. */
   double getDistance(EarthPosition that) {
     double product = this.direction.dotProduct(that.direction);
+
+    // Although both direction vectors are normalized, their dot product may be slightly outside of
+    // [-1, 1] due to floating point error. Clamp to [-1, 1] to make sure.
+    product = Math.max(product, -1);
+    product = Math.min(product, 1);
+
     double centralAngle = Math.acos(product);
     if (Double.isNaN(centralAngle)) {
       throw new AssertionError("acos returned NaN");
     }
-    return RADIUS * centralAngle;
+    return EARTH_RADIUS * centralAngle;
   }
 
   private static double nextDouble(Random r, double min, double max) {

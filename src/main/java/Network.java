@@ -37,7 +37,7 @@ abstract class Network {
 
 /**
  * A network in which all nodes are directly connected through a fiber optic cable, but there are
- * random delays up to 2x.
+ * random delays up to 3x.
  */
 class FullyConnectedNetwork extends Network {
   private final Random random;
@@ -49,7 +49,7 @@ class FullyConnectedNetwork extends Network {
 
   public double getLatency(Node source, Node destination) {
     double bestCaseLatency = source.getDistance(destination) / Network.SPEED_OF_FIBER;
-    double multiplier = random.nextDouble() * 2;
+    double multiplier = random.nextDouble() * 3;
     return multiplier * bestCaseLatency;
   }
 }

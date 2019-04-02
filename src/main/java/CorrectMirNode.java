@@ -2,16 +2,18 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-class CorrectTendermintNode extends Node {
+class CorrectMirNode extends Node {
   private int cycle = 0;
   private Map<Integer, CycleState> cycleStates = new HashMap<>();
   private ProtocolState protocolState;
   private double timeout;
   private double nextTimer;
 
-  CorrectTendermintNode(EarthPosition position, double initialTimeout) {
+  CorrectMirNode(EarthPosition position, double initialTimeout) {
     super(position);
     this.timeout = initialTimeout;
   }
@@ -33,15 +35,14 @@ class CorrectTendermintNode extends Node {
 
     switch (protocolState) {
       case PROPOSAL:
-        beginPreVote(simulation, timerEvent.getTime());
+        beginPrepareVote(simulation, timerEvent.getTime());
         break;
-      case PRE_VOTE:
-        beginPreCommit(simulation, timerEvent.getTime());
-        break;
-      case PRE_COMMIT:
+      case VOTE:
+        beginVote(simulation, timerEvent.getTime());
         ++cycle;
         // Exponential backoff.
-        timeout *= 2;
+        // TODO
+        //timeout *= 2;
         beginProposal(simulation, timerEvent.getTime());
         break;
       default:
@@ -62,12 +63,22 @@ class CorrectTendermintNode extends Node {
 
     if (message instanceof ProposalMessage) {
       cycleState.proposals.add(message.getProposal());
-    } else if (message instanceof PreVoteMessage) {
-      cycleState.preVoteCounts.merge(message.getProposal(), 1, Integer::sum);
-    } else if (message instanceof PreCommitMessage) {
-      cycleState.preCommitCounts.merge(message.getProposal(), 1, Integer::sum);
+      if (currentCycle && protocolState == ProtocolState.PROPOSAL) {
+        beginPrepareVote(simulation, time);
+      }
+    } else if (message instanceof PrepareVoteMessage) {
+      cycleState.prepareVoteCounts.merge(message.getProposal(), 1, Integer::sum);
+      if (currentCycle && protocolState != ProtocolState.COMMIT_VOTE) {
+        Set<Proposal> preparedProposals =
+            keysWithMinCount(cycleState.prepareVoteCounts, quorumSize(simulation));
+        if (!preparedProposals.isEmpty()) {
+          beginCommitVote(simulation, time);
+        }
+      }
+    } else if (message instanceof CommitVoteMessage) {
+      cycleState.commitVoteCounts.merge(message.getProposal(), 1, Integer::sum);
       Set<Proposal> committedProposals = keysWithMinCount(
-          cycleState.preCommitCounts, quorumSize(simulation));
+          cycleState.commitVoteCounts, quorumSize(simulation));
       if (!committedProposals.isEmpty()) {
         Proposal committedProposal = committedProposals.iterator().next();
         if (committedProposal != null) {
@@ -77,7 +88,7 @@ class CorrectTendermintNode extends Node {
             System.out.printf("%s Tendermint terminated in cycle %d with timeout %f; %b\n",
                 this, message.getCycle(), timeout, hasTerminated());
         } else if (currentCycle) {
-          // Nil was pre-committed in this cycle. Move on to the next cycle.
+          // Nil was committed in this cycle. Move on to the next cycle.
           ++cycle;
           beginProposal(simulation, time);
         }
@@ -97,36 +108,45 @@ class CorrectTendermintNode extends Node {
     resetTimeout(simulation, time);
   }
 
-  private void beginPreVote(Simulation simulation, double time) {
-    protocolState = ProtocolState.PRE_VOTE;
+  private void beginPrepareVote(Simulation simulation, double time) {
+    protocolState = ProtocolState.PREPARE_VOTE;
     Set<Proposal> proposals = getCurrentCycleState().proposals;
     Message message;
     if (proposals.size() == 1) {
       Proposal proposal = proposals.iterator().next();
-      message = new PreVoteMessage(cycle, proposal, this);
+      message = new PrepareVoteMessage(cycle, proposal, this);
     } else {
       // No proposals received, or more than one received. Either way, vote for null.
-      message = new PreVoteMessage(cycle, null, this);
+      message = new PrepareVoteMessage(cycle, null, this);
     }
     simulation.broadcast(this, message, time);
     resetTimeout(simulation, time);
   }
 
-  private void beginPreCommit(Simulation simulation, double time) {
-    protocolState = ProtocolState.PRE_COMMIT;
-    Map<Proposal, Integer> prevoteCounts = getCurrentCycleState().preVoteCounts;
-    Set<Proposal> preVotedProposals = keysWithMinCount(prevoteCounts, quorumSize(simulation));
+  private void beginCommitVote(Simulation simulation, double time) {
+    protocolState = ProtocolState.COMMIT_VOTE;
+    Map<Proposal, Integer> mergedVoteCounts = mergeCounts(
+        getCurrentCycleState().prepareVoteCounts, getCurrentCycleState().commitVoteCounts);
+    Set<Proposal> preparedProposals = keysWithMinCount(mergedVoteCounts, quorumSize(simulation));
     Message message;
-    if (preVotedProposals.isEmpty()) {
-      message = new PreCommitMessage(cycle, null, this);
-    } else if (preVotedProposals.size() == 1) {
-      Proposal proposal = preVotedProposals.iterator().next();
-      message = new PreCommitMessage(cycle, proposal, this);
+    if (preparedProposals.isEmpty()) {
+      message = new CommitVoteMessage(cycle, null, this);
+    } else if (preparedProposals.size() == 1) {
+      Proposal proposal = preparedProposals.iterator().next();
+      message = new CommitVoteMessage(cycle, proposal, this);
     } else {
       throw new AssertionError("Safety violation");
     }
     simulation.broadcast(this, message, time);
     resetTimeout(simulation, time);
+  }
+
+  private static <K> Map<K, Integer> mergeCounts(Map<K, Integer> a, Map<K, Integer> b) {
+    Set<K> allKeys = Stream.concat(a.keySet().stream(), b.keySet().stream())
+        .collect(Collectors.toSet());
+    return allKeys.stream().collect(Collectors.toMap(
+        Function.identity(),
+        k -> a.getOrDefault(k, 0) + b.getOrDefault(k, 0)));
   }
 
   private static <K> Set<K> keysWithMinCount(Map<K, Integer> counts, int min) {
@@ -152,11 +172,11 @@ class CorrectTendermintNode extends Node {
 
   private class CycleState {
     private Set<Proposal> proposals = new HashSet<>();
-    private Map<Proposal, Integer> preVoteCounts = new HashMap<>();
-    private Map<Proposal, Integer> preCommitCounts = new HashMap<>();
+    private Map<Proposal, Integer> prepareVoteCounts = new HashMap<>();
+    private Map<Proposal, Integer> commitVoteCounts = new HashMap<>();
   }
 
   private enum ProtocolState {
-    PROPOSAL, PRE_VOTE, PRE_COMMIT
+    PROPOSAL, VOTE
   }
 }

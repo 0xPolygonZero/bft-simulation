@@ -13,7 +13,11 @@ abstract class Node {
 
   abstract void onMessageEvent(MessageEvent messageEvent, Simulation simulation);
 
-  void output(Proposal output, double terminationTime) {
+  boolean hasTerminated() {
+    return output != null;
+  }
+
+  void terminate(Proposal output, double terminationTime) {
     this.output = output;
     this.terminationTime = terminationTime;
   }

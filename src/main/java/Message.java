@@ -63,9 +63,9 @@ class NextVoteMessage extends Message {
   }
 }
 
-/** A Mir justify-vote message */
-class JustifyVoteMessage extends Message {
-  JustifyVoteMessage(int cycle, Proposal proposal, Node sender) {
+/** A Mir prepare-vote message */
+class PrepareVoteMessage extends Message {
+  PrepareVoteMessage(int cycle, Proposal proposal, Node sender) {
     super(cycle, proposal, sender);
   }
 }
