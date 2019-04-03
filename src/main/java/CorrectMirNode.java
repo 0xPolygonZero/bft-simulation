@@ -22,6 +22,7 @@ class CorrectMirNode extends Node {
 
   @Override public void onStart(Simulation simulation) {
     vote(simulation, 0);
+    resetTimeout(simulation, 0);
   }
 
   @Override public void onTimerEvent(TimerEvent timerEvent, Simulation simulation) {
@@ -71,7 +72,7 @@ class CorrectMirNode extends Node {
       RoundState roundState = messageCycleState.roundStates.get(messageRound);
 
       if (voteMessage instanceof PrepareVoteMessage) {
-        messageCycleState.addPrepareVote((PrepareVoteMessage) voteMessage, simulation);
+        messageCycleState.addPrepareVote((PrepareVoteMessage) voteMessage);
         Set<Proposal> preparedProposals = roundState.getPreparedProposals(simulation);
         if (currentCycle && currentRound && !preparedProposals.isEmpty()) {
           // A proposal was prepared. Move to the next round and vote to commit it.
@@ -80,7 +81,7 @@ class CorrectMirNode extends Node {
           resetTimeout(simulation, time);
         }
       } else {
-        messageCycleState.addCommitVote((CommitVoteMessage) voteMessage, simulation);
+        messageCycleState.addCommitVote((CommitVoteMessage) voteMessage);
         Set<Proposal> preparedProposals = roundState.getPreparedProposals(simulation);
         Set<Proposal> committedProposals = roundState.getCommittedProposals(simulation);
         if (currentCycle && !committedProposals.isEmpty()) {
@@ -89,12 +90,12 @@ class CorrectMirNode extends Node {
             terminate(committedProposal, time);
           } else {
             // Nil was committed. Transition to the next cycle.
-            ++cycle;
             round = 0;
-            while (getCurrentCycleState().committed) {
+            while (getCurrentCycleState().hasCommit(simulation)) {
               ++cycle;
             }
             vote(simulation, time);
+            resetTimeout(simulation, time);
           }
         } else if (currentCycle && currentRound && !preparedProposals.isEmpty()) {
           // A proposal was prepared. Move to the next round and vote to commit it.
@@ -197,26 +198,21 @@ class CorrectMirNode extends Node {
     /** The state of each round within this cycle. */
     final Map<Integer, RoundState> roundStates = new HashMap<>();
 
-    boolean committed = false;
-
-    /** May be null even if committed is true, indicating that nil was committed. */
-    Proposal committedProposal;
-
-    void addPrepareVote(PrepareVoteMessage prepareVote, Simulation simulation) {
+    void addPrepareVote(PrepareVoteMessage prepareVote) {
       roundStates.putIfAbsent(prepareVote.getRound(), new RoundState());
-      int count = roundStates.get(prepareVote.getRound()).prepareVoteCounts.merge(
+      roundStates.get(prepareVote.getRound()).prepareVoteCounts.merge(
           prepareVote.getProposal(), 1, Integer::sum);
     }
 
-    void addCommitVote(CommitVoteMessage commitVote, Simulation simulation) {
+    void addCommitVote(CommitVoteMessage commitVote) {
       roundStates.putIfAbsent(commitVote.getRound(), new RoundState());
-      int count = roundStates.get(commitVote.getRound()).commitVoteCounts.merge(
+      roundStates.get(commitVote.getRound()).commitVoteCounts.merge(
           commitVote.getProposal(), 1, Integer::sum);
+    }
 
-      if (!committed && count >= quorumSize(simulation)) {
-        committed = true;
-        committedProposal = commitVote.getProposal();
-      }
+    boolean hasCommit(Simulation simulation) {
+      return roundStates.values().stream()
+          .anyMatch(roundState -> roundState.hasCommit(simulation));
     }
   }
 
@@ -236,6 +232,10 @@ class CorrectMirNode extends Node {
       Map<Proposal, Integer> result = new HashMap<>(prepareVoteCounts);
       commitVoteCounts.forEach((k, v) -> result.merge(k, v, Integer::sum));
       return result;
+    }
+
+    boolean hasCommit(Simulation simulation) {
+      return !keysWithMinCount(commitVoteCounts, quorumSize(simulation)).isEmpty();
     }
   }
 }
