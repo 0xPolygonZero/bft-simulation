@@ -2,24 +2,26 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 class CorrectMirNode extends Node {
+  /** The current cycle number. */
   private int cycle = 0;
-  private Map<Integer, CycleState> cycleStates = new HashMap<>();
-  private ProtocolState protocolState;
-  private double timeout;
+  /** The observed state of each cycle. */
+  private final Map<Integer, CycleState> cycleStates = new HashMap<>();
+  /** The current round number within the current cycle. Round 0 is the proposal step. */
+  private int round = 0;
+
+  private double initialTimeout;
   private double nextTimer;
 
   CorrectMirNode(EarthPosition position, double initialTimeout) {
     super(position);
-    this.timeout = initialTimeout;
+    this.initialTimeout = initialTimeout;
   }
 
   @Override public void onStart(Simulation simulation) {
-    beginProposal(simulation, 0);
+    vote(simulation, 0);
   }
 
   @Override public void onTimerEvent(TimerEvent timerEvent, Simulation simulation) {
@@ -27,27 +29,16 @@ class CorrectMirNode extends Node {
       return;
     }
 
-    if (timerEvent.getTime() != nextTimer) {
+    double time = timerEvent.getTime();
+    if (time != nextTimer) {
       // It's a stale timer; we must have made the relevant state transition based on observed
       // messages rather than a timer. Ignore it.
       return;
     }
 
-    switch (protocolState) {
-      case PROPOSAL:
-        beginPrepareVote(simulation, timerEvent.getTime());
-        break;
-      case VOTE:
-        beginVote(simulation, timerEvent.getTime());
-        ++cycle;
-        // Exponential backoff.
-        // TODO
-        //timeout *= 2;
-        beginProposal(simulation, timerEvent.getTime());
-        break;
-      default:
-        throw new AssertionError("Unexpected protocol state");
-    }
+    ++round;
+    vote(simulation, time);
+    resetTimeout(simulation, time);
   }
 
   @Override public void onMessageEvent(MessageEvent messageEvent, Simulation simulation) {
@@ -56,97 +47,132 @@ class CorrectMirNode extends Node {
     }
 
     Message message = messageEvent.getMessage();
-    double time = messageEvent.getTime();
+    int messageCycle = message.getCycle();
     boolean currentCycle = message.getCycle() == cycle;
-    cycleStates.putIfAbsent(message.getCycle(), new CycleState());
-    CycleState cycleState = cycleStates.get(message.getCycle());
+    CycleState messageCycleState = getCycleState(messageCycle);
+    Proposal proposal = message.getProposal();
+    double time = messageEvent.getTime();
 
     if (message instanceof ProposalMessage) {
-      cycleState.proposals.add(message.getProposal());
-      if (currentCycle && protocolState == ProtocolState.PROPOSAL) {
-        beginPrepareVote(simulation, time);
+      // A proposal was received. If it's for the current cycle, move to the next round and vote to
+      // prepare it.
+      messageCycleState.proposals.add(proposal);
+      if (currentCycle && round == 0) {
+        ++round;
+        Message prepareVote = new PrepareVoteMessage(cycle, round, proposal, this);
+        simulation.broadcast(this, prepareVote, time);
+        resetTimeout(simulation, time);
       }
-    } else if (message instanceof PrepareVoteMessage) {
-      cycleState.prepareVoteCounts.merge(message.getProposal(), 1, Integer::sum);
-      if (currentCycle && protocolState != ProtocolState.COMMIT_VOTE) {
-        Set<Proposal> preparedProposals =
-            keysWithMinCount(cycleState.prepareVoteCounts, quorumSize(simulation));
-        if (!preparedProposals.isEmpty()) {
-          beginCommitVote(simulation, time);
+    } else {
+      MirVoteMessage voteMessage = (MirVoteMessage) message;
+      int messageRound = voteMessage.getRound();
+      boolean currentRound = messageRound == round;
+      messageCycleState.roundStates.putIfAbsent(messageRound, new RoundState());
+      RoundState roundState = messageCycleState.roundStates.get(messageRound);
+
+      if (voteMessage instanceof PrepareVoteMessage) {
+        messageCycleState.addPrepareVote((PrepareVoteMessage) voteMessage, simulation);
+        Set<Proposal> preparedProposals = roundState.getPreparedProposals(simulation);
+        if (currentCycle && currentRound && !preparedProposals.isEmpty()) {
+          // A proposal was prepared. Move to the next round and vote to commit it.
+          ++round;
+          vote(simulation, time);
+          resetTimeout(simulation, time);
+        }
+      } else {
+        messageCycleState.addCommitVote((CommitVoteMessage) voteMessage, simulation);
+        Set<Proposal> preparedProposals = roundState.getPreparedProposals(simulation);
+        Set<Proposal> committedProposals = roundState.getCommittedProposals(simulation);
+        if (currentCycle && !committedProposals.isEmpty()) {
+          Proposal committedProposal = committedProposals.iterator().next();
+          if (committedProposal != null) {
+            terminate(committedProposal, time);
+          } else {
+            // Nil was committed. Transition to the next cycle.
+            ++cycle;
+            round = 0;
+            while (getCurrentCycleState().committed) {
+              ++cycle;
+            }
+            vote(simulation, time);
+          }
+        } else if (currentCycle && currentRound && !preparedProposals.isEmpty()) {
+          // A proposal was prepared. Move to the next round and vote to commit it.
+          ++round;
+          vote(simulation, time);
+          resetTimeout(simulation, time);
         }
       }
-    } else if (message instanceof CommitVoteMessage) {
-      cycleState.commitVoteCounts.merge(message.getProposal(), 1, Integer::sum);
-      Set<Proposal> committedProposals = keysWithMinCount(
-          cycleState.commitVoteCounts, quorumSize(simulation));
-      if (!committedProposals.isEmpty()) {
-        Proposal committedProposal = committedProposals.iterator().next();
-        if (committedProposal != null) {
-          terminate(committedProposal, time);
-          // TODO temp
-          if (equals(simulation.getNetwork().getNodes().get(0)))
-            System.out.printf("%s Tendermint terminated in cycle %d with timeout %f; %b\n",
-                this, message.getCycle(), timeout, hasTerminated());
-        } else if (currentCycle) {
-          // Nil was committed in this cycle. Move on to the next cycle.
-          ++cycle;
-          beginProposal(simulation, time);
-        }
+    }
+  }
+
+  private void vote(Simulation simulation, double time) {
+    Message vote = getVote(simulation, time);
+    if (vote != null) {
+      simulation.broadcast(this, vote, time);
+    }
+  }
+
+  private Message getVote(Simulation simulation, double time) {
+    if (round == 0) {
+      // Proposal step.
+      if (equals(simulation.getLeader(cycle))) {
+        Proposal proposal = new Proposal();
+        return new ProposalMessage(cycle, proposal, this);
+      } else {
+        return null;
       }
     } else {
-      throw new AssertionError("Unexpected message: " + message);
+      // Search for the latest proposal that was prepared, if any.
+      for (int prevRound = round - 1; prevRound > 0; --prevRound) {
+        RoundState prevRoundState = getCurrentCycleState().roundStates
+            .getOrDefault(prevRound, new RoundState());
+        Set<Proposal> prevPreparedProposals = prevRoundState.getPreparedProposals(simulation);
+        if (!prevPreparedProposals.isEmpty()) {
+          Proposal preparedProposal = prevPreparedProposals.iterator().next();
+          if (prevRound == round - 1) {
+            return new CommitVoteMessage(cycle, round, preparedProposal, this);
+          } else {
+            return new PrepareVoteMessage(cycle, round, preparedProposal, this);
+          }
+        }
+      }
+
+      // No proposal has been prepared. Fall back to whatever proposal we've observed if there was
+      // exactly one, else nil.
+      Proposal fallbackProposal;
+      if (getCurrentCycleState().proposals.size() == 1) {
+        fallbackProposal = getCurrentCycleState().proposals.iterator().next();
+      } else {
+        fallbackProposal = null;
+      }
+      return new PrepareVoteMessage(cycle, round, fallbackProposal, this);
     }
   }
 
-  private void beginProposal(Simulation simulation, double time) {
-    protocolState = ProtocolState.PROPOSAL;
-    if (equals(simulation.getLeader(cycle))) {
-      Proposal proposal = new Proposal();
-      Message message = new ProposalMessage(cycle, proposal, this);
-      simulation.broadcast(this, message, time);
-    }
-    resetTimeout(simulation, time);
+  private void resetTimeout(Simulation simulation, double time) {
+    nextTimer = time + getCurrentTimeout();
+    simulation.scheduleEvent(new TimerEvent(nextTimer, this));
   }
 
-  private void beginPrepareVote(Simulation simulation, double time) {
-    protocolState = ProtocolState.PREPARE_VOTE;
-    Set<Proposal> proposals = getCurrentCycleState().proposals;
-    Message message;
-    if (proposals.size() == 1) {
-      Proposal proposal = proposals.iterator().next();
-      message = new PrepareVoteMessage(cycle, proposal, this);
-    } else {
-      // No proposals received, or more than one received. Either way, vote for null.
-      message = new PrepareVoteMessage(cycle, null, this);
+  private double getCurrentTimeout() {
+    int numIncreases = cycle;
+    if (round >= 3) {
+      numIncreases += (round - 1) / 2;
     }
-    simulation.broadcast(this, message, time);
-    resetTimeout(simulation, time);
+
+    if (numIncreases > 30) {
+      System.out.println("WARNING: Surpassed max timeout.");
+      numIncreases = 30;
+    }
+
+    double multiplier = 1 << numIncreases;
+    return initialTimeout * multiplier;
   }
 
-  private void beginCommitVote(Simulation simulation, double time) {
-    protocolState = ProtocolState.COMMIT_VOTE;
-    Map<Proposal, Integer> mergedVoteCounts = mergeCounts(
-        getCurrentCycleState().prepareVoteCounts, getCurrentCycleState().commitVoteCounts);
-    Set<Proposal> preparedProposals = keysWithMinCount(mergedVoteCounts, quorumSize(simulation));
-    Message message;
-    if (preparedProposals.isEmpty()) {
-      message = new CommitVoteMessage(cycle, null, this);
-    } else if (preparedProposals.size() == 1) {
-      Proposal proposal = preparedProposals.iterator().next();
-      message = new CommitVoteMessage(cycle, proposal, this);
-    } else {
-      throw new AssertionError("Safety violation");
-    }
-    simulation.broadcast(this, message, time);
-    resetTimeout(simulation, time);
-  }
-
-  private static <K> Map<K, Integer> mergeCounts(Map<K, Integer> a, Map<K, Integer> b) {
-    Set<K> allKeys = Stream.concat(a.keySet().stream(), b.keySet().stream())
-        .collect(Collectors.toSet());
-    return allKeys.stream().collect(Collectors.toMap(
-        Function.identity(),
-        k -> a.getOrDefault(k, 0) + b.getOrDefault(k, 0)));
+  private static int quorumSize(Simulation simulation) {
+    int nodes = simulation.getNetwork().getNodes().size();
+    return nodes * 2 / 3 + 1;
   }
 
   private static <K> Set<K> keysWithMinCount(Map<K, Integer> counts, int min) {
@@ -155,28 +181,61 @@ class CorrectMirNode extends Node {
         .collect(Collectors.toSet());
   }
 
-  private void resetTimeout(Simulation simulation, double time) {
-    nextTimer = time + timeout;
-    simulation.scheduleEvent(new TimerEvent(nextTimer, this));
-  }
-
   private CycleState getCurrentCycleState() {
-    cycleStates.putIfAbsent(cycle, new CycleState());
-    return cycleStates.get(cycle);
+    return getCycleState(cycle);
   }
 
-  private int quorumSize(Simulation simulation) {
-    int nodes = simulation.getNetwork().getNodes().size();
-    return nodes * 2 / 3 + 1;
+  private CycleState getCycleState(int c) {
+    cycleStates.putIfAbsent(c, new CycleState());
+    return cycleStates.get(c);
   }
 
-  private class CycleState {
-    private Set<Proposal> proposals = new HashSet<>();
-    private Map<Proposal, Integer> prepareVoteCounts = new HashMap<>();
-    private Map<Proposal, Integer> commitVoteCounts = new HashMap<>();
+  private static class CycleState {
+    /** Proposals received within this cycle. */
+    final Set<Proposal> proposals = new HashSet<>();
+
+    /** The state of each round within this cycle. */
+    final Map<Integer, RoundState> roundStates = new HashMap<>();
+
+    boolean committed = false;
+
+    /** May be null even if committed is true, indicating that nil was committed. */
+    Proposal committedProposal;
+
+    void addPrepareVote(PrepareVoteMessage prepareVote, Simulation simulation) {
+      roundStates.putIfAbsent(prepareVote.getRound(), new RoundState());
+      int count = roundStates.get(prepareVote.getRound()).prepareVoteCounts.merge(
+          prepareVote.getProposal(), 1, Integer::sum);
+    }
+
+    void addCommitVote(CommitVoteMessage commitVote, Simulation simulation) {
+      roundStates.putIfAbsent(commitVote.getRound(), new RoundState());
+      int count = roundStates.get(commitVote.getRound()).commitVoteCounts.merge(
+          commitVote.getProposal(), 1, Integer::sum);
+
+      if (!committed && count >= quorumSize(simulation)) {
+        committed = true;
+        committedProposal = commitVote.getProposal();
+      }
+    }
   }
 
-  private enum ProtocolState {
-    PROPOSAL, VOTE
+  private static class RoundState {
+    Map<Proposal, Integer> prepareVoteCounts = new HashMap<>();
+    Map<Proposal, Integer> commitVoteCounts = new HashMap<>();
+
+    Set<Proposal> getPreparedProposals(Simulation simulation) {
+      return keysWithMinCount(getCombinedVoteCounts(), quorumSize(simulation));
+    }
+
+    Set<Proposal> getCommittedProposals(Simulation simulation) {
+      return keysWithMinCount(commitVoteCounts, quorumSize(simulation));
+    }
+
+    Map<Proposal, Integer> getCombinedVoteCounts() {
+      Map<Proposal, Integer> result = new HashMap<>(prepareVoteCounts);
+      commitVoteCounts.forEach((k, v) -> result.merge(k, v, Integer::sum));
+      return result;
+    }
   }
 }

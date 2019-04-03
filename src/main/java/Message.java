@@ -63,16 +63,29 @@ class NextVoteMessage extends Message {
   }
 }
 
-/** A Mir prepare-vote message */
-class PrepareVoteMessage extends Message {
-  PrepareVoteMessage(int cycle, Proposal proposal, Node sender) {
+abstract class MirVoteMessage extends Message {
+  private final int round;
+
+  MirVoteMessage(int cycle, int round, Proposal proposal, Node sender) {
     super(cycle, proposal, sender);
+    this.round = round;
+  }
+
+  int getRound() {
+    return round;
+  }
+}
+
+/** A Mir prepare-vote message */
+class PrepareVoteMessage extends MirVoteMessage {
+  PrepareVoteMessage(int cycle, int round, Proposal proposal, Node sender) {
+    super(cycle, round, proposal, sender);
   }
 }
 
 /** A Mir commit-vote message */
-class CommitVoteMessage extends Message {
-  CommitVoteMessage(int cycle, Proposal proposal, Node sender) {
-    super(cycle, proposal, sender);
+class CommitVoteMessage extends MirVoteMessage {
+  CommitVoteMessage(int cycle, int round, Proposal proposal, Node sender) {
+    super(cycle, round, proposal, sender);
   }
 }

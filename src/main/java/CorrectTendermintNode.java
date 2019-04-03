@@ -25,7 +25,8 @@ class CorrectTendermintNode extends Node {
       return;
     }
 
-    if (timerEvent.getTime() != nextTimer) {
+    double time = timerEvent.getTime();
+    if (time != nextTimer) {
       // It's a stale timer; we must have made the relevant state transition based on observed
       // messages rather than a timer. Ignore it.
       return;
@@ -33,16 +34,16 @@ class CorrectTendermintNode extends Node {
 
     switch (protocolState) {
       case PROPOSAL:
-        beginPreVote(simulation, timerEvent.getTime());
+        beginPreVote(simulation, time);
         break;
       case PRE_VOTE:
-        beginPreCommit(simulation, timerEvent.getTime());
+        beginPreCommit(simulation, time);
         break;
       case PRE_COMMIT:
         ++cycle;
         // Exponential backoff.
         timeout *= 2;
-        beginProposal(simulation, timerEvent.getTime());
+        beginProposal(simulation, time);
         break;
       default:
         throw new AssertionError("Unexpected protocol state");
@@ -56,7 +57,6 @@ class CorrectTendermintNode extends Node {
 
     Message message = messageEvent.getMessage();
     double time = messageEvent.getTime();
-    boolean currentCycle = message.getCycle() == cycle;
     cycleStates.putIfAbsent(message.getCycle(), new CycleState());
     CycleState cycleState = cycleStates.get(message.getCycle());
 
@@ -72,14 +72,6 @@ class CorrectTendermintNode extends Node {
         Proposal committedProposal = committedProposals.iterator().next();
         if (committedProposal != null) {
           terminate(committedProposal, time);
-          // TODO temp
-          if (equals(simulation.getNetwork().getNodes().get(0)))
-            System.out.printf("%s Tendermint terminated in cycle %d with timeout %f; %b\n",
-                this, message.getCycle(), timeout, hasTerminated());
-        } else if (currentCycle) {
-          // Nil was pre-committed in this cycle. Move on to the next cycle.
-          ++cycle;
-          beginProposal(simulation, time);
         }
       }
     } else {
