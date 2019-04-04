@@ -49,7 +49,7 @@ class FullyConnectedNetwork extends Network {
 
   double getLatency(Node source, Node destination) {
     double bestCaseLatency = source.getDistance(destination) / Network.SPEED_OF_FIBER;
-    double multiplier = random.nextDouble() * 3;
+    double multiplier = 1 + random.nextDouble();
     return multiplier * bestCaseLatency;
   }
 }

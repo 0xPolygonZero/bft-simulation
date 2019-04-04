@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.DoubleSummaryStatistics;
 import java.util.List;
 import java.util.Optional;
@@ -6,39 +7,50 @@ import java.util.Random;
 import java.util.stream.Collectors;
 
 public class Main {
-  private static final int RANDOM_SEED = 1234;
-  private static final double TIME_LIMIT = 10;
+  private static final int RANDOM_SEED = 12345;
+  private static final double TIME_LIMIT = 3;
+  private static final int SAMPLES = 100;
 
   public static void main(String[] args) {
+    // Print the first row which contains column names.
+    System.out.println("initial_timeout, tendermint, algorand, this_work");
+
     double tendermintBest = Double.MAX_VALUE;
     double algorandBest = Double.MAX_VALUE;
     double mirBest = Double.MAX_VALUE;
-    for (double initalTimeout = 0.01; initalTimeout <= 0.3; initalTimeout += 0.01) {
-      Optional<DoubleSummaryStatistics> tendermintStats =
-          runTendermint(initalTimeout, 90, 10);
-      Optional<DoubleSummaryStatistics> algorandStats =
-          runAlgorand(initalTimeout, 90, 10);
-      Optional<DoubleSummaryStatistics> mirStats =
-          runMir(initalTimeout, 90, 10);
 
-      if (tendermintStats.isPresent()) {
-        tendermintBest = Math.min(tendermintBest, tendermintStats.get().getAverage());
-      }
-      if (algorandStats.isPresent()) {
-        algorandBest = Math.min(algorandBest, algorandStats.get().getAverage());
-      }
-      if (mirStats.isPresent()) {
-        mirBest = Math.min(mirBest, mirStats.get().getAverage());
+    for (double initalTimeout = 0.01; initalTimeout <= 0.4; initalTimeout += 0.01) {
+      DoubleSummaryStatistics tendermintOverallStats = new DoubleSummaryStatistics(),
+          algorandOverallStats = new DoubleSummaryStatistics(),
+          mirOverallStats = new DoubleSummaryStatistics();
+      for (int i = 0; i < SAMPLES; ++i) {
+        Optional<DoubleSummaryStatistics> tendermintStats =
+            runTendermint(initalTimeout, 90, 10);
+        Optional<DoubleSummaryStatistics> algorandStats =
+            runAlgorand(initalTimeout, 90, 10);
+        Optional<DoubleSummaryStatistics> mirStats =
+            runMir(initalTimeout, 90, 10);
+
+        tendermintStats.ifPresent(tendermintOverallStats::combine);
+        algorandStats.ifPresent(algorandOverallStats::combine);
+        mirStats.ifPresent(mirOverallStats::combine);
       }
 
-      System.out.println();
-      System.out.printf("Initial timeout: %f\n", initalTimeout);
-      System.out.printf("Tendermint termination time: %s\n",
-          tendermintStats.map(Main::statisticsToCompactString).orElse("FAILED"));
-      System.out.printf("Algorand termination time: %s\n",
-          algorandStats.map(Main::statisticsToCompactString).orElse("FAILED"));
-      System.out.printf("Mir termination time: %s\n",
-          mirStats.map(Main::statisticsToCompactString).orElse("FAILED"));
+      if (tendermintOverallStats.getCount() > 0) {
+        tendermintBest = Math.min(tendermintBest, tendermintOverallStats.getAverage());
+      }
+      if (algorandOverallStats.getCount() > 0) {
+        algorandBest = Math.min(algorandBest, algorandOverallStats.getAverage());
+      }
+      if (mirOverallStats.getCount() > 0) {
+        mirBest = Math.min(mirBest, mirOverallStats.getAverage());
+      }
+
+      System.out.printf("%f, %s, %s, %s\n",
+          initalTimeout,
+          tendermintOverallStats.getCount() > 0 ? tendermintOverallStats.getAverage() : "",
+          algorandOverallStats.getCount() > 0 ? algorandOverallStats.getAverage() : "",
+          mirOverallStats.getCount() > 0 ? mirOverallStats.getAverage() : "");
     }
 
     System.out.println();
@@ -49,7 +61,7 @@ public class Main {
 
   private static Optional<DoubleSummaryStatistics> runTendermint(
       double initialTimeout, int correctNodeCount, int failedNodeCount) {
-    Random random = new Random(RANDOM_SEED);
+    Random random = new Random();
     List<Node> nodes = new ArrayList<>();
     for (int i = 0; i < correctNodeCount; ++i) {
       EarthPosition position = EarthPosition.randomPosition(random);
@@ -59,6 +71,7 @@ public class Main {
       EarthPosition position = EarthPosition.randomPosition(random);
       nodes.add(new FailedNode(position));
     }
+    Collections.shuffle(nodes, random);
 
     Network network = new FullyConnectedNetwork(nodes, random);
     Simulation simulation = new Simulation(network);
@@ -81,7 +94,7 @@ public class Main {
 
   private static Optional<DoubleSummaryStatistics> runAlgorand(
       double initialTimeout, int correctNodeCount, int failedNodeCout) {
-    Random random = new Random(RANDOM_SEED);
+    Random random = new Random();
     List<Node> nodes = new ArrayList<>();
     for (int i = 0; i < correctNodeCount; ++i) {
       EarthPosition position = EarthPosition.randomPosition(random);
@@ -91,6 +104,7 @@ public class Main {
       EarthPosition position = EarthPosition.randomPosition(random);
       nodes.add(new FailedNode(position));
     }
+    Collections.shuffle(nodes, random);
 
     Network network = new FullyConnectedNetwork(nodes, random);
     Simulation simulation = new Simulation(network);
@@ -114,7 +128,7 @@ public class Main {
 
   private static Optional<DoubleSummaryStatistics> runMir(
       double initialTimeout, int correctNodeCount, int failedNodeCount) {
-    Random random = new Random(RANDOM_SEED);
+    Random random = new Random();
     List<Node> nodes = new ArrayList<>();
     for (int i = 0; i < correctNodeCount; ++i) {
       EarthPosition position = EarthPosition.randomPosition(random);
@@ -124,6 +138,7 @@ public class Main {
       EarthPosition position = EarthPosition.randomPosition(random);
       nodes.add(new FailedNode(position));
     }
+    Collections.shuffle(nodes, random);
 
     Network network = new FullyConnectedNetwork(nodes, random);
     Simulation simulation = new Simulation(network);
