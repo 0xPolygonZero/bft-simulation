@@ -2,7 +2,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 class CorrectMirNode extends Node {
   /** The current cycle number. */
@@ -108,13 +107,13 @@ class CorrectMirNode extends Node {
   }
 
   private void vote(Simulation simulation, double time) {
-    Message vote = getVote(simulation, time);
+    Message vote = getVote(simulation);
     if (vote != null) {
       simulation.broadcast(this, vote, time);
     }
   }
 
-  private Message getVote(Simulation simulation, double time) {
+  private Message getVote(Simulation simulation) {
     if (round == 0) {
       // Proposal step.
       if (equals(simulation.getLeader(cycle))) {
@@ -176,12 +175,6 @@ class CorrectMirNode extends Node {
     return nodes * 2 / 3 + 1;
   }
 
-  private static <K> Set<K> keysWithMinCount(Map<K, Integer> counts, int min) {
-    return counts.keySet().stream()
-        .filter(k -> counts.get(k) >= min)
-        .collect(Collectors.toSet());
-  }
-
   private CycleState getCurrentCycleState() {
     return getCycleState(cycle);
   }
@@ -217,16 +210,8 @@ class CorrectMirNode extends Node {
   }
 
   private static class RoundState {
-    Map<Proposal, Integer> prepareVoteCounts = new HashMap<>();
-    Map<Proposal, Integer> commitVoteCounts = new HashMap<>();
-
-    Set<Proposal> getPreparedProposals(Simulation simulation) {
-      return keysWithMinCount(getCombinedVoteCounts(), quorumSize(simulation));
-    }
-
-    Set<Proposal> getCommittedProposals(Simulation simulation) {
-      return keysWithMinCount(commitVoteCounts, quorumSize(simulation));
-    }
+    final Map<Proposal, Integer> prepareVoteCounts = new HashMap<>();
+    final Map<Proposal, Integer> commitVoteCounts = new HashMap<>();
 
     Map<Proposal, Integer> getCombinedVoteCounts() {
       Map<Proposal, Integer> result = new HashMap<>(prepareVoteCounts);
@@ -234,8 +219,16 @@ class CorrectMirNode extends Node {
       return result;
     }
 
+    Set<Proposal> getPreparedProposals(Simulation simulation) {
+      return Util.keysWithMinCount(getCombinedVoteCounts(), quorumSize(simulation));
+    }
+
+    Set<Proposal> getCommittedProposals(Simulation simulation) {
+      return Util.keysWithMinCount(commitVoteCounts, quorumSize(simulation));
+    }
+
     boolean hasCommit(Simulation simulation) {
-      return !keysWithMinCount(commitVoteCounts, quorumSize(simulation)).isEmpty();
+      return !getCommittedProposals(simulation).isEmpty();
     }
   }
 }

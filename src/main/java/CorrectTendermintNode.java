@@ -2,7 +2,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 class CorrectTendermintNode extends Node {
   private int cycle = 0;
@@ -66,7 +65,7 @@ class CorrectTendermintNode extends Node {
       cycleState.preVoteCounts.merge(message.getProposal(), 1, Integer::sum);
     } else if (message instanceof PreCommitMessage) {
       cycleState.preCommitCounts.merge(message.getProposal(), 1, Integer::sum);
-      Set<Proposal> committedProposals = keysWithMinCount(
+      Set<Proposal> committedProposals = Util.keysWithMinCount(
           cycleState.preCommitCounts, quorumSize(simulation));
       if (!committedProposals.isEmpty()) {
         Proposal committedProposal = committedProposals.iterator().next();
@@ -107,7 +106,7 @@ class CorrectTendermintNode extends Node {
   private void beginPreCommit(Simulation simulation, double time) {
     protocolState = ProtocolState.PRE_COMMIT;
     Map<Proposal, Integer> prevoteCounts = getCurrentCycleState().preVoteCounts;
-    Set<Proposal> preVotedProposals = keysWithMinCount(prevoteCounts, quorumSize(simulation));
+    Set<Proposal> preVotedProposals = Util.keysWithMinCount(prevoteCounts, quorumSize(simulation));
     Message message;
     if (preVotedProposals.isEmpty()) {
       message = new PreCommitMessage(cycle, null, this);
@@ -119,12 +118,6 @@ class CorrectTendermintNode extends Node {
     }
     simulation.broadcast(this, message, time);
     resetTimeout(simulation, time);
-  }
-
-  private static <K> Set<K> keysWithMinCount(Map<K, Integer> counts, int min) {
-    return counts.keySet().stream()
-        .filter(k -> counts.get(k) >= min)
-        .collect(Collectors.toSet());
   }
 
   private void resetTimeout(Simulation simulation, double time) {

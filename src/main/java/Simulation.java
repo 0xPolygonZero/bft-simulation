@@ -31,14 +31,21 @@ class Simulation {
   /**
    * Run until all events have been processed, including any newly added events which may be added
    * while running.
+   *
+   * @param timeLimit the maximum amount of time before the simulation halts
+   * @return whether the simulation completed within the time limit
    */
-  void run() {
+  boolean run(double timeLimit) {
     for (Node node : network.getNodes()) {
       node.onStart(this);
     }
 
     while (!eventsByTime.isEmpty()) {
       Event event = eventsByTime.pollFirst();
+      if (event.getTime() > timeLimit) {
+        return false;
+      }
+
       Node subject = event.getSubject();
       if (event instanceof TimerEvent) {
         subject.onTimerEvent((TimerEvent) event, this);
@@ -48,5 +55,7 @@ class Simulation {
         throw new AssertionError("Unexpected event: " + event);
       }
     }
+
+    return true;
   }
 }
