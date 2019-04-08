@@ -69,15 +69,36 @@ class CorrectAlgorandNode extends Node {
   private void handleSoftVoteMessage(Simulation simulation, double time,
       SoftVoteMessage softVoteMessage) {
     getCycleState(softVoteMessage.getCycle()).addSoftVote(softVoteMessage);
-    boolean currentCycle = cycle == softVoteMessage.getCycle();
-    if (currentCycle && phase == Phase.CERTIFYING
-        && getCurrentCycleState().myCertifiedProposal == null) {
-      Set<Proposal> softVotedProposals = getCurrentCycleState().getSoftVotedProposals(simulation);
+    if (cycle != softVoteMessage.getCycle()) {
+      return;
+    }
+
+    CycleState currentCycleState = getCurrentCycleState();
+    Set<Proposal> softVotedProposals = currentCycleState.getSoftVotedProposals(simulation);
+
+    if (phase == Phase.CERTIFYING && currentCycleState.myCertifiedProposal == null) {
       if (!softVotedProposals.isEmpty()) {
         Proposal proposalToCertify = softVotedProposals.iterator().next();
-        Message certVote = new CertVoteMessage(cycle, proposalToCertify, this);
+        Message certVote = new CertVoteMessage(cycle, proposalToCertify);
         simulation.broadcast(this, certVote, time);
-        getCurrentCycleState().myCertifiedProposal = proposalToCertify;
+        currentCycleState.myCertifiedProposal = proposalToCertify;
+      }
+    } else if (phase == Phase.SECOND_FINISHING) {
+      for (Proposal softVotedProposal : softVotedProposals) {
+        if (softVotedProposal != null &&
+            currentCycleState.myNextVotedProposals.add(softVotedProposal)) {
+          Message nextVote = new NextVoteMessage(cycle, softVotedProposal);
+          simulation.broadcast(this, nextVote, time);
+        }
+      }
+      if (cycle > 0 && currentCycleState.myCertifiedProposal == null) {
+        CycleState lastCycleState = getLastCycleState();
+        if (lastCycleState.getNextVotedProposals(simulation).contains(null)) {
+          if (currentCycleState.myNextVotedProposals.add(null)) {
+            Message nextVote = new NextVoteMessage(cycle, null);
+            simulation.broadcast(this, nextVote, time);
+          }
+        }
       }
     }
   }
@@ -118,7 +139,7 @@ class CorrectAlgorandNode extends Node {
     phase = Phase.PROPOSAL;
     if (equals(simulation.getLeader(cycle))) {
       Proposal proposal = new Proposal();
-      Message message = new ProposalMessage(cycle, proposal, this);
+      Message message = new ProposalMessage(cycle, proposal);
       simulation.broadcast(this, message, time);
     }
     resetTimeout(simulation, time);
@@ -127,7 +148,7 @@ class CorrectAlgorandNode extends Node {
   private void doFiltering(Simulation simulation, double time) {
     Set<Proposal> nextVotedProposals;
     if (cycle > 0) {
-      nextVotedProposals = getCycleState(cycle - 1).getNextVotedProposals(simulation);
+      nextVotedProposals = getLastCycleState().getNextVotedProposals(simulation);
     } else {
       nextVotedProposals = new HashSet<>();
     }
@@ -142,7 +163,7 @@ class CorrectAlgorandNode extends Node {
     }
 
     if (proposalToSoftVote != null) {
-      Message softVote = new SoftVoteMessage(cycle, proposalToSoftVote, this);
+      Message softVote = new SoftVoteMessage(cycle, proposalToSoftVote);
       simulation.broadcast(this, softVote, time);
     }
 
@@ -155,13 +176,14 @@ class CorrectAlgorandNode extends Node {
     if (getCurrentCycleState().myCertifiedProposal != null) {
       proposalToNextVote = getCurrentCycleState().myCertifiedProposal;
     } else if (cycle > 0
-        && getCycleState(cycle - 1).getNextVotedProposals(simulation).contains(null)) {
+        && getLastCycleState().getNextVotedProposals(simulation).contains(null)) {
       proposalToNextVote = null;
     } else {
       proposalToNextVote = getCurrentCycleState().startingValue;
     }
 
-    NextVoteMessage nextVote = new NextVoteMessage(cycle, proposalToNextVote, this);
+    getCurrentCycleState().myNextVotedProposals.add(proposalToNextVote);
+    NextVoteMessage nextVote = new NextVoteMessage(cycle, proposalToNextVote);
     simulation.broadcast(this, nextVote, time);
 
     phase = Phase.SECOND_FINISHING;
@@ -176,6 +198,10 @@ class CorrectAlgorandNode extends Node {
     return getCycleState(cycle);
   }
 
+  private CycleState getLastCycleState() {
+    return getCycleState(cycle - 1);
+  }
+
   private CycleState getCycleState(int c) {
     cycleStates.putIfAbsent(c, new CycleState());
     return cycleStates.get(c);
@@ -185,6 +211,7 @@ class CorrectAlgorandNode extends Node {
     private Proposal startingValue = null;
     private Set<Proposal> proposals = new HashSet<>();
     private Proposal myCertifiedProposal = null;
+    private Set<Proposal> myNextVotedProposals = new HashSet<>();
     private Map<Proposal, Integer> softVoteCounts = new HashMap<>();
     private Map<Proposal, Integer> certVoteCounts = new HashMap<>();
     private Map<Proposal, Integer> nextVoteCounts = new HashMap<>();

@@ -118,7 +118,7 @@ class CorrectMirNode extends Node {
       // Proposal step.
       if (equals(simulation.getLeader(cycle))) {
         Proposal proposal = new Proposal();
-        return new ProposalMessage(cycle, proposal, this);
+        return new ProposalMessage(cycle, proposal);
       } else {
         return null;
       }

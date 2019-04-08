@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 public class Main {
   private static final int RANDOM_SEED = 12345;
-  private static final double TIME_LIMIT = 3;
+  private static final double TIME_LIMIT = 4;
   private static final int SAMPLES = 100;
 
   public static void main(String[] args) {
@@ -46,7 +46,7 @@ public class Main {
         mirBest = Math.min(mirBest, mirOverallStats.getAverage());
       }
 
-      System.out.printf("%f, %s, %s, %s\n",
+      System.out.printf("%.2f, %s, %s, %s\n",
           initalTimeout,
           tendermintOverallStats.getCount() > 0 ? tendermintOverallStats.getAverage() : "",
           algorandOverallStats.getCount() > 0 ? algorandOverallStats.getAverage() : "",
@@ -54,9 +54,9 @@ public class Main {
     }
 
     System.out.println();
-    System.out.printf("Tendermint best: %.2f\n", tendermintBest);
-    System.out.printf("Algorand best: %.2f\n", algorandBest);
-    System.out.printf("Mir best: %.2f\n", mirBest);
+    System.out.printf("Tendermint best: %.4f\n", tendermintBest);
+    System.out.printf("Algorand best: %.4f\n", algorandBest);
+    System.out.printf("Mir best: %.4f\n", mirBest);
   }
 
   private static Optional<DoubleSummaryStatistics> runTendermint(
