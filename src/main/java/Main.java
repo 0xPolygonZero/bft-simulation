@@ -9,15 +9,15 @@ import java.util.stream.Collectors;
 public class Main {
   private static final int RANDOM_SEED = 12345;
   private static final double TIME_LIMIT = 4;
-  private static final int SAMPLES = 100;
+  private static final int SAMPLES = 1000;
 
   public static void main(String[] args) {
     // Print the first row which contains column names.
     System.out.println("initial_timeout, tendermint, algorand, this_work");
 
-    double tendermintBest = Double.MAX_VALUE;
-    double algorandBest = Double.MAX_VALUE;
-    double mirBest = Double.MAX_VALUE;
+    double tendermintBestLatency = Double.MAX_VALUE, tendermintBestTimeout = 0;
+    double algorandBestLatency = Double.MAX_VALUE, algorandBestTimeout = 0;
+    double mirBestLatency = Double.MAX_VALUE, mirBestTimeout = 0;
 
     for (double initalTimeout = 0.01; initalTimeout <= 0.4; initalTimeout += 0.01) {
       DoubleSummaryStatistics tendermintOverallStats = new DoubleSummaryStatistics(),
@@ -36,14 +36,20 @@ public class Main {
         mirStats.ifPresent(mirOverallStats::combine);
       }
 
-      if (tendermintOverallStats.getCount() > 0) {
-        tendermintBest = Math.min(tendermintBest, tendermintOverallStats.getAverage());
+      if (tendermintOverallStats.getCount() > 0 &&
+          tendermintOverallStats.getAverage() < tendermintBestLatency) {
+        tendermintBestLatency = tendermintOverallStats.getAverage();
+        tendermintBestTimeout = initalTimeout;
       }
-      if (algorandOverallStats.getCount() > 0) {
-        algorandBest = Math.min(algorandBest, algorandOverallStats.getAverage());
+      if (algorandOverallStats.getCount() > 0 &&
+          algorandOverallStats.getAverage() < algorandBestLatency) {
+        algorandBestLatency = algorandOverallStats.getAverage();
+        algorandBestTimeout = initalTimeout;
       }
-      if (mirOverallStats.getCount() > 0) {
-        mirBest = Math.min(mirBest, mirOverallStats.getAverage());
+      if (mirOverallStats.getCount() > 0 &&
+          mirOverallStats.getAverage() < mirBestLatency) {
+        mirBestLatency = mirOverallStats.getAverage();
+        mirBestTimeout = initalTimeout;
       }
 
       System.out.printf("%.2f, %s, %s, %s\n",
@@ -54,9 +60,15 @@ public class Main {
     }
 
     System.out.println();
-    System.out.printf("Tendermint best: %.4f\n", tendermintBest);
-    System.out.printf("Algorand best: %.4f\n", algorandBest);
-    System.out.printf("Mir best: %.4f\n", mirBest);
+    System.out.printf("Tendermint best with timeout %.2f: %.4f\n",
+        tendermintBestTimeout, tendermintBestLatency);
+    System.out.printf("Algorand best with timeout %.2f: %.4f\n",
+        algorandBestTimeout, algorandBestLatency);
+    System.out.printf("Mir best with timeout %.2f: %.4f\n",
+        mirBestTimeout, mirBestLatency);
+    double secondBestLatency = Math.min(tendermintBestLatency, algorandBestLatency);
+    System.out.printf("Mir speedup: %.4f\n",
+        (secondBestLatency - mirBestLatency) / secondBestLatency);
   }
 
   private static Optional<DoubleSummaryStatistics> runTendermint(

@@ -43,7 +43,7 @@ class Simulation {
     while (!eventsByTime.isEmpty()) {
       Event event = eventsByTime.pollFirst();
       if (event.getTime() > timeLimit) {
-        System.out.println("WARNING: Simulation timed out");
+        //System.out.println("WARNING: Simulation timed out");
         return false;
       }
 
